@@ -261,8 +261,178 @@ def format_truncation_metadata(metadata: "TruncationMetadata", url: str) -> str:
     if metadata.next_start_index is not None:
         lines.extend([
             "",
-            "To continue reading, call fetch with start_index:",
-            f'  fetch(url="{url}", start_index={metadata.next_start_index})',
+            "To continue reading, call fetch_content with start_index:",
+            f'  fetch_content(url="{url}", start_index={metadata.next_start_index})',
         ])
+    
+    return "\n".join(lines)
+
+
+def format_member_search_results(
+    results: list[dict[str, Any]],
+    query: str,
+    community_url: str = "",
+) -> str:
+    """
+    Format member search results for LLM consumption.
+    Returns basic info only (no profile details). Use format_member_profile for details.
+
+    Args:
+        results: List of raw member records from the API
+        query: The original search query
+        community_url: The base URL of the Igloo community (for building profile URLs)
+
+    Returns:
+        A formatted string containing the member search results with basic info.
+    """
+    if not results:
+        return f"No results found for query '{query}'."
+
+    output = f'Member Search Results for "{query}" ({len(results)} found):'
+
+    for member in results:
+        output += "\n----------\n"
+        output += _format_member_basic_info(member, community_url)
+
+    output += "\n----------"
+
+    return output
+
+
+def _format_member_basic_info(member: dict[str, Any], community_url: str = "") -> str:
+    """
+    Format basic info for a single member (used in search results).
+    Minimal output to save tokens - use fetch_member for full details.
+    
+    Args:
+        member: Raw member record from the API
+        community_url: Base URL for building profile links (unused, kept for API compatibility)
+    """
+    name_info = member.get("name", {})
+    full_name = name_info.get("fullName", "Unknown")
+    email = member.get("email", "N/A")
+    member_id = member.get("id", "N/A")
+    
+    lines = [
+        f"Name: {full_name}",
+        f"Email: {email}",
+        f"Member ID: {member_id}",
+    ]
+    
+    return "\n".join(lines)
+
+
+# Map raw API profile field names to display labels (whitelist approach)
+# Only fields in this mapping will be included in the output
+PROFILE_FIELD_MAPPING = {
+    "title": "Job Title",
+    "department": "Department",
+    "i_report_to_email": "Manager Email",
+    "office_location": "Office",
+    "desk_number": "Desk",
+    "busphone": "Work Phone",
+    "extension": "Extension",
+    "cellphone": "Mobile",
+    "work_start_date": "Start Date",
+}
+
+
+def format_member_profiles(
+    results: list[dict[str, str]],
+    total_count: int,
+) -> str:
+    """
+    Format multiple member profile results for LLM consumption.
+
+    Each member is formatted with a clear header showing its position,
+    with separators between members for easy reading.
+
+    Args:
+        results: List of dictionaries with 'member_id', 'profile' (content), and optionally 'error'.
+        total_count: Total number of members being fetched (for display in headers).
+
+    Returns:
+        Formatted string with all member profiles concatenated with clear separators.
+    """
+    if not results:
+        return "No member profiles to display."
+
+    formatted_parts = []
+
+    for i, result in enumerate(results, start=1):
+        member_id = result.get("member_id", "Unknown")
+        profile = result.get("profile", "")
+        error = result.get("error")
+
+        header = f"===== MEMBER {i} of {total_count} =====\n"
+
+        if error:
+            content = f"Member ID: {member_id}\n[Error: {error}]\n"
+        else:
+            content = f"{profile}\n"
+
+        formatted_parts.append(header + content)
+
+    return "\n".join(formatted_parts)
+
+
+def format_member_profile(
+    member_info: dict[str, Any],
+    profile_items: list[dict[str, Any]],
+    manager_name: str | None,
+    community_url: str = "",
+) -> str:
+    """
+    Format detailed member profile for LLM consumption.
+    
+    Args:
+        member_info: Raw member info from get_member_info API call
+        profile_items: List of raw profile items from get_member_profile API call
+        manager_name: Manager's full name (fetched separately), or None
+        community_url: The base URL of the Igloo community
+    
+    Returns:
+        A formatted string containing the detailed member profile.
+    """
+    name_info = member_info.get("name", {})
+    full_name = name_info.get("fullName", "Unknown")
+    email = member_info.get("email", "N/A")
+    username = member_info.get("namespace", "N/A")
+    profile_url = f"{community_url}/.profile/{username}" if community_url and username else "N/A"
+    
+    lines = [
+        f"Member Profile: {full_name}",
+        "----------",
+        f"Name: {full_name}",
+        f"Email: {email}",
+        f"Username: {username}",
+        f"Profile URL: {profile_url}",
+    ]
+    
+    # Add manager name if available
+    if manager_name:
+        lines.append(f"Manager Name: {manager_name}")
+    
+    # Process raw profile items using whitelist
+    for item in profile_items:
+        field_name = item.get("Name", "")
+        field_value = item.get("Value", "")
+        
+        # Skip empty or null values
+        if not field_value or field_value == "null":
+            continue
+        
+        # Get display label from whitelist
+        label = PROFILE_FIELD_MAPPING.get(field_name)
+        if not label:
+            continue  # Only show fields in the whitelist
+        
+        # Clean up date format
+        if "date" in field_name and " " in str(field_value):
+            field_value = str(field_value).split(" ")[0]
+        
+        lines.append(f"{label}: {field_value}")
+    
+    lines.append("----------")
     
     return "\n".join(lines)

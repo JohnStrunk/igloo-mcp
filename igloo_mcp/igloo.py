@@ -305,3 +305,70 @@ class IglooClient:
         tasks = [self.fetch_page(url) for url in urls]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         return list(results)
+
+    async def search_members(
+        self,
+        query: str,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """
+        Search for members in the community.
+        
+        Args:
+            query: Name or partial name to search for
+            limit: Maximum number of results to return
+            
+        Returns:
+            List of raw member records from the API (limited to `limit` results).
+            Each record contains fields like: id, name (with fullName, firstName, lastName),
+            email, namespace, etc.
+        """
+        endpoint = "/.api/api.svc/search/members"
+        response = await self._request(
+            method="GET",
+            endpoint=endpoint,
+            params={"q": query},
+        )
+        
+        response_json = response.json()
+        hits = response_json.get("response", {}).get("value", {}).get("hit", [])
+        
+        return hits[:limit]
+
+    async def get_member_profile(self, member_id: str) -> list[dict[str, Any]]:
+        """
+        Get detailed profile information for a member.
+        
+        Args:
+            member_id: The member's ID (from search_members results)
+            
+        Returns:
+            List of raw profile items from the API. Each item has "Name" and "Value" keys.
+        """
+        endpoint = f"/.api/api.svc/users/{member_id}/viewprofile"
+        response = await self._request(
+            method="GET",
+            endpoint=endpoint,
+        )
+        
+        response_json = response.json()
+        return response_json.get("response", {}).get("items", [])
+
+    async def get_member_info(self, member_id: str) -> dict[str, Any]:
+        """
+        Get a member's basic info by their ID.
+        
+        Args:
+            member_id: The member's ID
+            
+        Returns:
+            Raw member response from the API containing name info.
+        """
+        endpoint = f"/.api/api.svc/users/{member_id}/view"
+        response = await self._request(
+            method="GET",
+            endpoint=endpoint,
+        )
+        response_json = response.json()
+        return response_json.get("response", {})
+

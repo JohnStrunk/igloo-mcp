@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import date
@@ -21,6 +22,9 @@ from igloo_mcp.formatter import (
     format_fetch_result,
     format_fetch_results,
     format_truncation_metadata,
+    format_member_search_results,
+    format_member_profile,
+    format_member_profiles,
 )
 from igloo_mcp.igloo import ApplicationType, IglooClient, UpdatedDateType
 from igloo_mcp.logger import logger, configure_logger
@@ -90,8 +94,8 @@ async def health_check(request: Request) -> JSONResponse:
     return JSONResponse({"status": "healthy"})
 
 
-@mcp.tool(name="search")
-async def search_tool(
+@mcp.tool(name="search_content")
+async def search_content_tool(
     ctx: Context[ServerSession, AppContext],
     query: str | None = None,
     applications: list[
@@ -238,8 +242,8 @@ async def search_tool(
     )
 
 
-@mcp.tool(name="fetch")
-async def fetch_tool(
+@mcp.tool(name="fetch_content")
+async def fetch_content_tool(
     ctx: Context[ServerSession, AppContext],
     url: str | list[str],
     max_length: int | None = None,
@@ -282,7 +286,6 @@ async def fetch_tool(
     Notes:
         - Only URLs from the configured community are allowed
         - Navigation, scripts, ads, and other non-content elements are removed
-        - Use this tool to get the full content of pages found via search
         - Multiple URLs are fetched concurrently for efficiency
         - Maximum number of URLs per request is limited by fetch_max_pages config
         - For large documents, follow CONTINUE instructions to read remaining content
@@ -451,6 +454,123 @@ async def fetch_tool(
         results=formatted_results,
         total_count=len(urls),
     )
+
+
+@mcp.tool(name="search_members")
+async def search_members_tool(
+    ctx: Context[ServerSession, AppContext],
+    query: str,
+    limit: int = 10,
+) -> str:
+    """
+    Search for members in the Igloo community by name.
+
+    Args:
+        query (str): Name or partial name to search for. Case-insensitive.
+            Example: "John Smith", "Jane", "Smith"
+        limit (int, optional): Maximum number of members to return (1-100). Default: 10.
+
+    Returns:
+        str: Formatted list of matching members with name, email, and member_id.
+    """
+    if not query.strip():
+        return "Error: Query cannot be empty. Provide a name or partial name to search for."
+
+    client = ctx.request_context.lifespan_context.igloo_client
+
+    try:
+        raw_results = await client.search_members(query=query, limit=limit)
+    except httpx.HTTPStatusError as e:
+        return f"Error: HTTP {e.response.status_code} - Failed to search members"
+    except httpx.TimeoutException:
+        return "Error: Request timed out while searching members"
+
+    return format_member_search_results(
+        results=raw_results,
+        query=query,
+        community_url=client.community,
+    )
+
+
+@mcp.tool(name="fetch_members")
+async def fetch_members_tool(
+    ctx: Context[ServerSession, AppContext],
+    members_ids: list[str],
+) -> str:
+    """
+    Fetch detailed profile information for one or more members by their ID.
+
+    Args:
+        members_ids (list[str]): A list of member IDs to fetch profiles for.
+
+    Returns:
+        str: Detailed member profile(s), containing information such as:
+         Full name, email, username, Job title and department, Manager name, Contact info (phone, mobile), and office location.
+         For multiple IDs, each profile is clearly separated with headers.
+    """
+    client = ctx.request_context.lifespan_context.igloo_client
+
+    if len(members_ids) == 0:
+        return "Error: No member IDs provided."
+
+    tasks = [_fetch_single_member(client, mid) for mid in members_ids]
+    results = await asyncio.gather(*tasks)
+
+    formatted_results = []
+    for mid, result in zip(members_ids, results):
+        formatted_results.append(
+            {
+                "member_id": mid,
+                "profile": result.get("profile"),
+                "error": result.get("error"),
+            }
+        )
+
+    return format_member_profiles(
+        results=formatted_results,
+        total_count=len(members_ids),
+    )
+
+
+async def _fetch_single_member(
+    client: IglooClient,
+    member_id: str,
+) -> dict[str, str]:
+    """
+    Fetch a single member's profile.
+
+    Returns dict with either 'profile' key (success) or 'error' key (failure).
+    """
+    try:
+        member_info, profile_items = await asyncio.gather(
+            client.get_member_info(member_id),
+            client.get_member_profile(member_id),
+        )
+    except httpx.HTTPStatusError as e:
+        return {
+            "error": f"HTTP {e.response.status_code} - Failed to fetch member '{member_id}'"
+        }
+    except httpx.TimeoutException:
+        return {"error": f"Request timed out while fetching member '{member_id}'"}
+
+    manager_name = None
+    for item in profile_items:
+        if item.get("Name") == "i_report_to" and item.get("Value"):
+            try:
+                manager_response = await client.get_member_info(item["Value"])
+                manager_name = manager_response.get("name", {}).get("fullName")
+            except (httpx.HTTPStatusError, httpx.TimeoutException):
+                logger.warning(f"Failed to fetch manager info for member '{member_id}' with manager ID '{item['Value']}'")
+            break
+    
+    return {
+        "profile": format_member_profile(
+            member_info=member_info,
+            profile_items=profile_items,
+            manager_name=manager_name,
+            community_url=client.community,
+        )
+    }
 
 
 def main():

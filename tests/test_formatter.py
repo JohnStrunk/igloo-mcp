@@ -9,6 +9,8 @@ from igloo_mcp.formatter import (
     format_fetch_result,
     format_fetch_results,
     format_truncation_metadata,
+    format_member_search_results,
+    format_member_profile,
     _format_header,
     _format_single_result,
     _format_date,
@@ -969,8 +971,8 @@ class TestFormatTruncationMetadata:
         
         assert "⚠️ CONTENT TRUNCATED" in result
         assert "Showing 1,000 of 5,000 chars (20% of document)" in result
-        assert "To continue reading, call fetch with start_index:" in result
-        assert 'fetch(url="https://example.com/wiki/page", start_index=1000)' in result
+        assert "To continue reading, call fetch_content with start_index:" in result
+        assert 'fetch_content(url="https://example.com/wiki/page", start_index=1000)' in result
 
     def test_metadata_with_current_path(self):
         """Test formatting with current section path."""
@@ -1021,8 +1023,8 @@ class TestFormatTruncationMetadata:
         assert "Showing 49,800 of 125,000 chars (39% of document)" in result
         assert "Current section: Docs > API > Authentication" in result
         assert "Upcoming sections: Rate Limits, Error Codes, Webhooks, Examples, FAQ" in result
-        assert "To continue reading, call fetch with start_index:" in result
-        assert 'fetch(url="https://igloo.example.com/wiki/api-documentation", start_index=49800)' in result
+        assert "To continue reading, call fetch_content with start_index:" in result
+        assert 'fetch_content(url="https://igloo.example.com/wiki/api-documentation", start_index=49800)' in result
 
     def test_metadata_no_next_index(self):
         """Test formatting when next_start_index is None."""
@@ -1081,8 +1083,8 @@ class TestFormatTruncationMetadata:
         
         result = format_truncation_metadata(metadata, url)
         
-        assert "To continue reading, call fetch with start_index:" in result
-        assert '  fetch(url="https://example.com/page?query=test&filter=active", start_index=1000)' in result
+        assert "To continue reading, call fetch_content with start_index:" in result
+        assert '  fetch_content(url="https://example.com/page?query=test&filter=active", start_index=1000)' in result
 
     def test_metadata_starts_with_separator(self):
         """Test that output starts with newlines and separator."""
@@ -1116,8 +1118,8 @@ class TestFormatTruncationMetadata:
         result = format_truncation_metadata(metadata, url)
         
         # Should have continuation instructions with indented fetch command
-        assert "To continue reading, call fetch with start_index:" in result
-        assert '  fetch(url="https://example.com/page", start_index=1000)' in result
+        assert "To continue reading, call fetch_content with start_index:" in result
+        assert '  fetch_content(url="https://example.com/page", start_index=1000)' in result
         # Should NOT use table format
         assert "|" not in result
 
@@ -1279,3 +1281,253 @@ More content here.
         assert lines[0] == "# Fetched Content"
         assert "URL:" in result
         assert "---" in result
+
+
+class TestFormatMemberSearchResults:
+    """Tests for the format_member_search_results function (minimal info to save tokens)."""
+
+    def test_basic_formatting(self):
+        """Test basic member search formatting with raw API data structure."""
+        results = [{
+            "id": "12345",
+            "name": {"fullName": "Alice Johnson", "firstName": "Alice", "lastName": "Johnson"},
+            "email": "ajohnson@example.com",
+            "namespace": "ajohnson",
+        }]
+        
+        output = format_member_search_results(
+            results, query="Johnson", community_url="https://example.com"
+        )
+
+        assert 'Member Search Results for "Johnson" (1 found):' in output
+        assert "Name: Alice Johnson" in output
+        assert "Email: ajohnson@example.com" in output
+        assert "Member ID: 12345" in output
+        # Username and Profile URL are NOT in search results (saved for fetch_member to save tokens)
+        assert "Username:" not in output
+        assert "Profile URL:" not in output
+
+    def test_empty_results(self):
+        """Test formatting with no results."""
+        output = format_member_search_results(
+            results=[], query="NonExistent", community_url="https://example.com"
+        )
+
+        assert output == "No results found for query 'NonExistent'."
+
+    def test_multiple_results(self):
+        """Test formatting with multiple members."""
+        results = [
+            {
+                "id": "1",
+                "name": {"fullName": "John Smith"},
+                "email": "john@example.com",
+                "namespace": "jsmith",
+            },
+            {
+                "id": "2",
+                "name": {"fullName": "Jane Smith"},
+                "email": "jane@example.com",
+                "namespace": "janesmith",
+            },
+        ]
+        
+        output = format_member_search_results(
+            results, query="Smith", community_url="https://example.com"
+        )
+
+        assert 'Member Search Results for "Smith" (2 found):' in output
+        assert "Name: John Smith" in output
+        assert "Name: Jane Smith" in output
+        assert "Member ID: 1" in output
+        assert "Member ID: 2" in output
+        # Username and Profile URL not in search results
+        assert "Username:" not in output
+
+    def test_missing_optional_fields(self):
+        """Test formatting when optional fields are missing."""
+        results = [{
+            "id": "1",
+            "name": {"fullName": "Test Member"},
+            "email": "",
+            "namespace": "testmember",
+        }]
+        
+        output = format_member_search_results(
+            results, query="Test", community_url="https://example.com"
+        )
+        
+        assert "Name: Test Member" in output
+        assert "Email: " in output  # Empty but still shown
+
+    def test_separator_lines(self):
+        """Test that separator lines are present between results."""
+        results = [{
+            "id": "1",
+            "name": {"fullName": "Test"},
+            "email": "test@example.com",
+            "namespace": "test",
+        }]
+        
+        output = format_member_search_results(
+            results, query="Test", community_url="https://example.com"
+        )
+        
+        assert "----------" in output
+
+    def test_unicode_characters(self):
+        """Test formatting with unicode/international characters."""
+        results = [{
+            "id": "1",
+            "name": {"fullName": "田中太郎"},
+            "email": "tanaka@example.co.jp",
+            "namespace": "tanaka",
+        }]
+        
+        output = format_member_search_results(
+            results, query="田中", community_url="https://example.com"
+        )
+        
+        assert "Name: 田中太郎" in output
+        assert "Member ID: 1" in output
+
+
+class TestFormatMemberProfile:
+    """Tests for the format_member_profile function (detailed profile)."""
+
+    def test_basic_profile(self):
+        """Test formatting a basic member profile."""
+        member_info = {
+            "name": {"fullName": "Alice Johnson"},
+            "email": "ajohnson@example.com",
+            "namespace": "ajohnson",
+        }
+        profile_items = [
+            {"Name": "title", "Value": "Software Engineer"},
+        ]
+        
+        output = format_member_profile(
+            member_info=member_info,
+            profile_items=profile_items,
+            manager_name=None,
+            community_url="https://example.com"
+        )
+        
+        assert "Member Profile: Alice Johnson" in output
+        assert "Name: Alice Johnson" in output
+        assert "Email: ajohnson@example.com" in output
+        assert "Username: ajohnson" in output
+        assert "Job Title: Software Engineer" in output
+        assert "----------" in output
+
+    def test_full_profile_with_manager(self):
+        """Test formatting with complete profile data and manager."""
+        member_info = {
+            "name": {"fullName": "Alice Johnson"},
+            "email": "ajohnson@example.com",
+            "namespace": "ajohnson",
+        }
+        profile_items = [
+            {"Name": "title", "Value": "Software Engineer"},
+            {"Name": "department", "Value": "Engineering"},
+            {"Name": "i_report_to_email", "Value": "smanager@example.com"},
+            {"Name": "office_location", "Value": "HQ Building"},
+            {"Name": "desk_number", "Value": "A123"},
+            {"Name": "cellphone", "Value": "+1-555-1234"},
+            {"Name": "work_start_date", "Value": "2023-06-15"},
+        ]
+        
+        output = format_member_profile(
+            member_info=member_info,
+            profile_items=profile_items,
+            manager_name="Sarah Manager",
+            community_url="https://example.com"
+        )
+        
+        assert "Member Profile: Alice Johnson" in output
+        assert "Manager Name: Sarah Manager" in output
+        assert "Manager Email: smanager@example.com" in output
+        assert "Job Title: Software Engineer" in output
+        assert "Department: Engineering" in output
+        assert "Office: HQ Building" in output
+        assert "Desk: A123" in output
+        assert "Mobile: +1-555-1234" in output
+        assert "Start Date: 2023-06-15" in output
+
+    def test_empty_profile_items(self):
+        """Test formatting when profile_items list is empty."""
+        member_info = {
+            "name": {"fullName": "No Profile"},
+            "email": "noprofile@example.com",
+            "namespace": "noprofile",
+        }
+        
+        output = format_member_profile(
+            member_info=member_info,
+            profile_items=[],
+            manager_name=None,
+            community_url="https://example.com"
+        )
+        
+        assert "Member Profile: No Profile" in output
+        assert "Name: No Profile" in output
+        assert "Job Title:" not in output
+
+    def test_all_profile_fields(self):
+        """Test that all mapped profile fields are formatted when present."""
+        member_info = {
+            "name": {"fullName": "Complete Profile"},
+            "email": "complete@example.com",
+            "namespace": "complete",
+        }
+        profile_items = [
+            {"Name": "title", "Value": "Senior Engineer"},
+            {"Name": "department", "Value": "Engineering"},
+            {"Name": "i_report_to_email", "Value": "boss@example.com"},
+            {"Name": "office_location", "Value": "HQ Building"},
+            {"Name": "desk_number", "Value": "A123"},
+            {"Name": "busphone", "Value": "+1-555-1234"},
+            {"Name": "extension", "Value": "5678"},
+            {"Name": "cellphone", "Value": "+1-555-9999"},
+            {"Name": "work_start_date", "Value": "2020-01-15"},
+        ]
+        
+        output = format_member_profile(
+            member_info=member_info,
+            profile_items=profile_items,
+            manager_name="Boss Name",
+            community_url="https://example.com"
+        )
+        
+        assert "Job Title: Senior Engineer" in output
+        assert "Department: Engineering" in output
+        assert "Manager Name: Boss Name" in output
+        assert "Manager Email: boss@example.com" in output
+        assert "Office: HQ Building" in output
+        assert "Desk: A123" in output
+        assert "Work Phone: +1-555-1234" in output
+        assert "Extension: 5678" in output
+        assert "Mobile: +1-555-9999" in output
+        assert "Start Date: 2020-01-15" in output
+
+    def test_unicode_characters(self):
+        """Test formatting with unicode/international characters."""
+        member_info = {
+            "name": {"fullName": "田中太郎"},
+            "email": "tanaka@example.co.jp",
+            "namespace": "tanaka",
+        }
+        profile_items = [
+            {"Name": "office_location", "Value": "東京オフィス"},
+        ]
+        
+        output = format_member_profile(
+            member_info=member_info,
+            profile_items=profile_items,
+            manager_name=None,
+            community_url="https://example.com"
+        )
+        
+        assert "Member Profile: 田中太郎" in output
+        assert "Name: 田中太郎" in output
+        assert "Office: 東京オフィス" in output

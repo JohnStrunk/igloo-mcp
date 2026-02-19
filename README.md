@@ -8,6 +8,8 @@ An MCP (Model Context Protocol) server that provides AI assistants with search c
 - Filter by application types, date ranges, archived content, and parent paths
 - Sort results by views or relevance
 - Fetch and convert pages to Markdown (single or multiple URLs)
+- Search for members by name
+- Fetch detailed member profiles and contact information
 - Customizable server identity
 
 ## Prerequisites
@@ -97,7 +99,7 @@ By default, the server uses stdio transport. For HTTP transport, set `IGLOO_MCP_
 
 ## Available Tools
 
-### search
+### search_content
 
 Search for content in the Igloo community with extensive filtering options.
 
@@ -110,7 +112,7 @@ Search for content in the Igloo community with extensive filtering options.
 - `include_archived`: Include archived content (default: false)
 
 
-### fetch
+### fetch_content
 
 Fetch one or more pages from the Igloo community and convert to Markdown for LLM consumption.
 
@@ -130,11 +132,57 @@ When content exceeds `max_length`, the response is truncated at semantic boundar
 **Example Workflow:**
 
 ```
-1. Agent: fetch(url="https://igloo.example.com/wiki/deployment")
-   Response: [content] + "CONTINUE: fetch(url="...", start_index=49801)"
+1. Agent: fetch_content(url="https://igloo.example.com/wiki/deployment")
+   Response: [content] + "CONTINUE: fetch_content(url="...", start_index=49801)"
 
-2. Agent continues: fetch(url="...", start_index=49801)
-   OR jumps to section: fetch(url="...", section="Troubleshooting")
+2. Agent continues: fetch_content(url="...", start_index=49801)
+   OR jumps to section: fetch_content(url="...", section="Troubleshooting")
+```
+
+
+### search_members
+
+Search for members in the Igloo community by name. Returns basic information only.
+
+**Parameters:**
+- `query`: Name or partial name to search for (e.g., "John Smith", "Jane")
+- `limit`: Maximum number of members to return (default: 10)
+
+**Returns:**
+- List of matching members with basic info (name, email, member ID)
+- Use the `member_id` with `fetch_members` to get detailed profiles
+
+**Use Cases:**
+- Looking for someone by name
+- Need to identify which member to get more information about
+
+
+### fetch_members
+
+Get detailed profile information for one or more members by their ID(s).
+
+**Parameters:**
+- `members_ids`: A list of member IDs (obtained from `search_members` results)
+
+**Returns:**
+- Detailed member profile(s) including:
+  - Full name and email
+  - Job title and department
+  - Manager name
+  - Contact information (phone, office location)
+  - Profile URL
+
+**Example Workflow:**
+
+```
+1. Agent: search_members(query="John Smith")
+   Response: [list of matching members with their member_ids]
+
+2. Agent: fetch_members(members_ids=["12345-abcd-..."])
+   Response: [detailed profile for John Smith]
+
+3. Agent: fetch_members(members_ids=["12345-abcd-...", "67890-efgh-..."])
+   Response: [detailed profiles for multiple members]
 ```
 
 ## Docker

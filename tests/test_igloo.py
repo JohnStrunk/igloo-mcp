@@ -31,7 +31,7 @@ async def client() -> AsyncGenerator[IglooClient, None]:
         app_id="test_app_id",
         app_pass="test_app_pass",
         community_key=COMMUNITY_KEY,
-        username="test_user",
+        username="test_member",
         password="test_password",
         page_size=50,
     )
@@ -1223,7 +1223,7 @@ class TestIglooClientInitialization:
             app_id="test_app_id",
             app_pass="test_app_pass",
             community_key="12345",
-            username="test_user",
+            username="test_member",
             password="test_password",
             proxy="http://proxy.example.com:8080",
         )
@@ -1247,7 +1247,7 @@ class TestIglooClientInitialization:
             app_id="test_app_id",
             app_pass="test_app_pass",
             community_key="12345",
-            username="test_user",
+            username="test_member",
             password="test_password",
             verify_ssl=False,
         )
@@ -1269,7 +1269,7 @@ class TestIglooClientInitialization:
             app_id="test_app_id",
             app_pass="test_app_pass",
             community_key="12345",
-            username="test_user",
+            username="test_member",
             password="test_password",
         )
         try:
@@ -1291,7 +1291,7 @@ class TestIglooClientInitialization:
             app_id="test_app_id",
             app_pass="test_app_pass",
             community_key="12345",
-            username="test_user",
+            username="test_member",
             password="test_password",
             proxy="http://proxy.example.com:8080",
             verify_ssl=False,
@@ -1314,7 +1314,7 @@ class TestIglooClientInitialization:
             app_id="test_app_id",
             app_pass="test_app_pass",
             community_key="12345",
-            username="test_user",
+            username="test_member",
             password="test_password",
         )
         try:
@@ -1334,7 +1334,7 @@ class TestIglooClientInitialization:
             app_id="test_app_id",
             app_pass="test_app_pass",
             community_key="12345",
-            username="test_user",
+            username="test_member",
             password="test_password",
             page_size=100,
         )
@@ -1342,6 +1342,366 @@ class TestIglooClientInitialization:
             assert client.page_size == 100
         finally:
             await client._client.aclose()
+
+
+# ============================================================================
+# Search Members Tests
+# ============================================================================
+
+
+async def test_search_members_success(
+    client: IglooClient, mocker: MockerFixture
+):
+    """
+    Test successful member search returns raw API data.
+    
+    Verifies that:
+    - API endpoint is called correctly
+    - Raw API hits are returned (no field transformation)
+    """
+    mock_response_content = b'''
+    {
+        "response": {
+            "value": {
+                "hit": [
+                    {
+                        "id": "12345",
+                        "name": {"fullName": "Alice Johnson", "firstName": "Alice", "lastName": "Johnson"},
+                        "email": "ajohnson@example.com",
+                        "namespace": "ajohnson"
+                    }
+                ]
+            }
+        }
+    }
+    '''
+    request = Request(method="GET", url=f"{BASE_URL}/.api/api.svc/search/members")
+    mock_response = Response(200, content=mock_response_content, request=request)
+    mock_request = mocker.patch.object(
+        client._client, "request", return_value=mock_response, new_callable=mocker.AsyncMock
+    )
+
+    results = await client.search_members(query="Johnson", limit=5)
+
+    assert len(results) == 1
+    # Raw API data is returned as-is
+    assert results[0]["id"] == "12345"
+    assert results[0]["name"]["fullName"] == "Alice Johnson"
+    assert results[0]["name"]["firstName"] == "Alice"
+    assert results[0]["name"]["lastName"] == "Johnson"
+    assert results[0]["email"] == "ajohnson@example.com"
+    assert results[0]["namespace"] == "ajohnson"
+    mock_request.assert_called_once()
+
+
+async def test_search_members_multiple_results(
+    client: IglooClient, mocker: MockerFixture
+):
+    """
+    Test member search with multiple results.
+    
+    Verifies that:
+    - Multiple hits are returned correctly
+    - Results maintain order
+    """
+    mock_response_content = b'''
+    {
+        "response": {
+            "value": {
+                "hit": [
+                    {"id": "1", "name": {"fullName": "John Smith"}, "email": "john@example.com", "namespace": "jsmith"},
+                    {"id": "2", "name": {"fullName": "Jane Smith"}, "email": "jane@example.com", "namespace": "janesmith"},
+                    {"id": "3", "name": {"fullName": "Bob Smith"}, "email": "bob@example.com", "namespace": "bsmith"}
+                ]
+            }
+        }
+    }
+    '''
+    request = Request(method="GET", url=f"{BASE_URL}/.api/api.svc/search/members")
+    mock_response = Response(200, content=mock_response_content, request=request)
+    mocker.patch.object(
+        client._client, "request", return_value=mock_response, new_callable=mocker.AsyncMock
+    )
+
+    results = await client.search_members(query="Smith", limit=10)
+
+    assert len(results) == 3
+    assert results[0]["name"]["fullName"] == "John Smith"
+    assert results[1]["name"]["fullName"] == "Jane Smith"
+    assert results[2]["name"]["fullName"] == "Bob Smith"
+
+
+async def test_search_members_respects_limit(
+    client: IglooClient, mocker: MockerFixture
+):
+    """
+    Test that search_members respects the limit parameter.
+    
+    Verifies that:
+    - Only 'limit' number of results are returned even if API returns more
+    """
+    mock_response_content = b'''
+    {
+        "response": {
+            "value": {
+                "hit": [
+                    {"id": "1", "name": {"fullName": "Member 1"}, "email": "u1@example.com", "namespace": "u1"},
+                    {"id": "2", "name": {"fullName": "Member 2"}, "email": "u2@example.com", "namespace": "u2"},
+                    {"id": "3", "name": {"fullName": "Member 3"}, "email": "u3@example.com", "namespace": "u3"},
+                    {"id": "4", "name": {"fullName": "Member 4"}, "email": "u4@example.com", "namespace": "u4"},
+                    {"id": "5", "name": {"fullName": "Member 5"}, "email": "u5@example.com", "namespace": "u5"}
+                ]
+            }
+        }
+    }
+    '''
+    request = Request(method="GET", url=f"{BASE_URL}/.api/api.svc/search/members")
+    mock_response = Response(200, content=mock_response_content, request=request)
+    mocker.patch.object(
+        client._client, "request", return_value=mock_response, new_callable=mocker.AsyncMock
+    )
+
+    results = await client.search_members(query="Member", limit=2)
+
+    assert len(results) == 2
+    assert results[0]["name"]["fullName"] == "Member 1"
+    assert results[1]["name"]["fullName"] == "Member 2"
+
+
+async def test_search_members_empty_results(
+    client: IglooClient, mocker: MockerFixture
+):
+    """
+    Test member search with no results.
+    
+    Verifies that:
+    - Empty list is returned when no matches found
+    """
+    mock_response_content = b'''
+    {
+        "response": {
+            "value": {
+                "hit": []
+            }
+        }
+    }
+    '''
+    request = Request(method="GET", url=f"{BASE_URL}/.api/api.svc/search/members")
+    mock_response = Response(200, content=mock_response_content, request=request)
+    mocker.patch.object(
+        client._client, "request", return_value=mock_response, new_callable=mocker.AsyncMock
+    )
+
+    results = await client.search_members(query="NonExistentMember", limit=5)
+
+    assert len(results) == 0
+    assert results == []
+
+
+async def test_search_members_raw_data_returned(
+    client: IglooClient, mocker: MockerFixture
+):
+    """
+    Test that search_members returns raw API data without transformation.
+    
+    Verifies that:
+    - Raw hit objects are returned exactly as API provides them
+    - No field renaming is done (e.g., namespace stays namespace, not username)
+    """
+    mock_response_content = b'''
+    {
+        "response": {
+            "value": {
+                "hit": [
+                    {"id": "123", "name": {"fullName": "Test"}, "email": "test@example.com", "namespace": "testmember", "extra": "value"}
+                ]
+            }
+        }
+    }
+    '''
+    request = Request(method="GET", url=f"{BASE_URL}/.api/api.svc/search/members")
+    mock_response = Response(200, content=mock_response_content, request=request)
+    mocker.patch.object(
+        client._client, "request", return_value=mock_response, new_callable=mocker.AsyncMock
+    )
+
+    results = await client.search_members(query="test", limit=5)
+
+    assert len(results) == 1
+    # Verify raw fields are returned (not transformed)
+    assert "namespace" in results[0]  # Raw field name
+    assert "username" not in results[0]  # Not transformed
+    assert "extra" in results[0]  # Extra fields preserved
+
+
+async def test_search_members_http_error(
+    client: IglooClient, mocker: MockerFixture
+):
+    """
+    Test member search handles HTTP errors.
+    
+    Verifies that:
+    - HTTPStatusError is raised for error responses
+    """
+    request = Request(method="GET", url=f"{BASE_URL}/.api/api.svc/search/members")
+    mock_response = Response(500, content=b"Internal Server Error", request=request)
+    mocker.patch.object(
+        client._client, "request", return_value=mock_response, new_callable=mocker.AsyncMock
+    )
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await client.search_members(query="test", limit=5)
+
+
+# ============================================================================
+# Get Member Profile Tests
+# ============================================================================
+
+
+async def test_get_member_profile_success(
+    client: IglooClient, mocker: MockerFixture
+):
+    """
+    Test successful member profile retrieval returns raw items.
+    
+    Verifies that:
+    - Raw profile items are returned as-is from the API
+    - No field transformation is done
+    """
+    profile_response_content = b'''
+    {
+        "response": {
+            "items": [
+                {"Name": "title", "Value": "Software Engineer"},
+                {"Name": "department", "Value": "Engineering"},
+                {"Name": "i_report_to", "Value": "67890"},
+                {"Name": "i_report_to_email", "Value": "manager@example.com"},
+                {"Name": "office_location", "Value": "HQ Building"},
+                {"Name": "desk_number", "Value": "A123"},
+                {"Name": "cellphone", "Value": "+1-555-1234"},
+                {"Name": "work_start_date", "Value": "2023-06-15 00:00:00"}
+            ]
+        }
+    }
+    '''
+    
+    request = Request(method="GET", url=f"{BASE_URL}/.api/api.svc/members/12345/viewprofile")
+    mock_response = Response(200, content=profile_response_content, request=request)
+    mocker.patch.object(
+        client._client, "request", return_value=mock_response, new_callable=mocker.AsyncMock
+    )
+
+    items = await client.get_member_profile("12345")
+
+    # Returns raw items list, not a transformed dict
+    assert isinstance(items, list)
+    assert len(items) == 8
+    
+    # Verify raw structure is preserved
+    assert items[0] == {"Name": "title", "Value": "Software Engineer"}
+    assert items[1] == {"Name": "department", "Value": "Engineering"}
+
+
+async def test_get_member_profile_empty_response(
+    client: IglooClient, mocker: MockerFixture
+):
+    """
+    Test profile retrieval with empty items list.
+    
+    Verifies that:
+    - Empty list is returned for profiles with no data
+    """
+    profile_response_content = b'''
+    {
+        "response": {
+            "items": []
+        }
+    }
+    '''
+    
+    request = Request(method="GET", url=f"{BASE_URL}/.api/api.svc/members/12345/viewprofile")
+    mock_response = Response(200, content=profile_response_content, request=request)
+    mocker.patch.object(
+        client._client, "request", return_value=mock_response, new_callable=mocker.AsyncMock
+    )
+
+    items = await client.get_member_profile("12345")
+
+    assert items == []
+
+
+async def test_get_member_profile_http_error(
+    client: IglooClient, mocker: MockerFixture
+):
+    """
+    Test profile retrieval handles HTTP errors.
+    
+    Verifies that:
+    - HTTPStatusError is raised for error responses
+    """
+    request = Request(method="GET", url=f"{BASE_URL}/.api/api.svc/members/12345/viewprofile")
+    mock_response = Response(500, content=b"Internal Server Error", request=request)
+    mocker.patch.object(
+        client._client, "request", return_value=mock_response, new_callable=mocker.AsyncMock
+    )
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await client.get_member_profile("12345")
+
+
+# ============================================================================
+# Get Member Name Tests
+# ============================================================================
+
+
+async def test_get_member_info_success(
+    client: IglooClient, mocker: MockerFixture
+):
+    """
+    Test successful member name retrieval returns raw response.
+    
+    Verifies that:
+    - Raw API response is returned
+    - Name info is accessible from response
+    """
+    response_content = b'''
+    {
+        "response": {
+            "name": {"fullName": "Sarah Manager", "firstName": "Sarah", "lastName": "Manager"}
+        }
+    }
+    '''
+    
+    request = Request(method="GET", url=f"{BASE_URL}/.api/api.svc/members/67890/view")
+    mock_response = Response(200, content=response_content, request=request)
+    mocker.patch.object(
+        client._client, "request", return_value=mock_response, new_callable=mocker.AsyncMock
+    )
+
+    result = await client.get_member_info("67890")
+
+    # Returns raw response object
+    assert result["name"]["fullName"] == "Sarah Manager"
+    assert result["name"]["firstName"] == "Sarah"
+
+
+async def test_get_member_info_http_error(
+    client: IglooClient, mocker: MockerFixture
+):
+    """
+    Test get_member_info handles HTTP errors.
+    
+    Verifies that:
+    - HTTPStatusError is raised for error responses
+    """
+    request = Request(method="GET", url=f"{BASE_URL}/.api/api.svc/members/99999/view")
+    mock_response = Response(404, content=b"Not Found", request=request)
+    mocker.patch.object(
+        client._client, "request", return_value=mock_response, new_callable=mocker.AsyncMock
+    )
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await client.get_member_info("99999")
 
 
 # ============================================================================
@@ -1365,7 +1725,7 @@ class TestUrlValidation:
             app_id="test_app_id",
             app_pass="test_app_pass",
             community_key=COMMUNITY_KEY,
-            username="test_user",
+            username="test_member",
             password="test_password",
         )
         try:
@@ -1395,7 +1755,7 @@ class TestUrlValidation:
             app_id="test_app_id",
             app_pass="test_app_pass",
             community_key=COMMUNITY_KEY,
-            username="test_user",
+            username="test_member",
             password="test_password",
         )
         try:
@@ -1416,7 +1776,7 @@ class TestUrlValidation:
             app_id="test_app_id",
             app_pass="test_app_pass",
             community_key=COMMUNITY_KEY,
-            username="test_user",
+            username="test_member",
             password="test_password",
         )
         try:
@@ -1438,7 +1798,7 @@ class TestUrlValidation:
             app_id="test_app_id",
             app_pass="test_app_pass",
             community_key=COMMUNITY_KEY,
-            username="test_user",
+            username="test_member",
             password="test_password",
         )
         try:
@@ -1459,7 +1819,7 @@ class TestUrlValidation:
             app_id="test_app_id",
             app_pass="test_app_pass",
             community_key=COMMUNITY_KEY,
-            username="test_user",
+            username="test_member",
             password="test_password",
         )
         try:
