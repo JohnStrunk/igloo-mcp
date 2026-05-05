@@ -3,8 +3,8 @@
 import re
 from dataclasses import dataclass, field
 from bs4 import BeautifulSoup
-from html_to_markdown import convert, ConversionOptions, PreprocessingOptions
-from typing import Literal, Optional
+from html_to_markdown import convert, ConversionOptions, PreprocessingOptions, HeadingStyle
+from typing import Optional
 
 
 # Tags to remove during sanitization
@@ -289,7 +289,7 @@ def extract_main_content(html_string: str) -> str:
 
 def html_to_markdown(
     html_string: str,
-    heading_style: Literal["underlined", "atx", "atx_closed"] = "atx",
+    heading_style: HeadingStyle = HeadingStyle.ATX,
     bullets: str = "-",
 ) -> str:
     """
