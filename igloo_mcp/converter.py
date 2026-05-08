@@ -3,7 +3,13 @@
 import re
 from dataclasses import dataclass, field
 from bs4 import BeautifulSoup
-from html_to_markdown import convert, ConversionOptions, PreprocessingOptions, HeadingStyle
+from html_to_markdown._html_to_markdown import (
+    convert,
+    ConversionOptions,
+    HeadingStyle,
+    PreprocessingOptions,
+    PreprocessingPreset,
+)
 from typing import Optional
 
 
@@ -289,7 +295,7 @@ def extract_main_content(html_string: str) -> str:
 
 def html_to_markdown(
     html_string: str,
-    heading_style: HeadingStyle = HeadingStyle.ATX,
+    heading_style: HeadingStyle = HeadingStyle.Atx,
     bullets: str = "-",
 ) -> str:
     """
@@ -303,22 +309,23 @@ def html_to_markdown(
     Returns:
         Markdown string.
     """
+    preprocessing = PreprocessingOptions(
+        enabled=True,
+        preset=PreprocessingPreset.Aggressive,
+        remove_navigation=True,
+        remove_forms=True,
+    )
+
     options = ConversionOptions(
         heading_style=heading_style,
         list_indent_width=2,
         bullets=bullets,
         strong_em_symbol="*",
         wrap=False,
+        preprocessing=preprocessing,
     )
 
-    preprocessing = PreprocessingOptions(
-        enabled=True,
-        preset="aggressive",
-        remove_navigation=True,
-        remove_forms=True,
-    )
-
-    return convert(html_string, options, preprocessing)
+    return convert(html_string, options).content
 
 
 class OffsetError(ValueError):
