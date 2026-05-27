@@ -10,7 +10,7 @@ from html_to_markdown._html_to_markdown import (
     PreprocessingOptions,
     PreprocessingPreset,
 )
-from typing import Optional
+from typing import Literal, Optional
 
 
 # Tags to remove during sanitization
@@ -295,7 +295,7 @@ def extract_main_content(html_string: str) -> str:
 
 def html_to_markdown(
     html_string: str,
-    heading_style: HeadingStyle = HeadingStyle.Atx,
+    heading_style: HeadingStyle = HeadingStyle.ATX,
     bullets: str = "-",
 ) -> str:
     """
@@ -311,7 +311,7 @@ def html_to_markdown(
     """
     preprocessing = PreprocessingOptions(
         enabled=True,
-        preset=PreprocessingPreset.Aggressive,
+        preset=PreprocessingPreset.AGGRESSIVE,
         remove_navigation=True,
         remove_forms=True,
     )
