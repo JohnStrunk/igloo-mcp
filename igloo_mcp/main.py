@@ -5,8 +5,7 @@ from datetime import date
 from typing import AsyncIterator, Literal
 
 import httpx
-from mcp.server.fastmcp import Context, FastMCP
-from mcp.server.session import ServerSession
+from mcp.server.mcpserver import Context, MCPServer
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -43,7 +42,7 @@ _config = Config()
 
 
 @asynccontextmanager
-async def lifespan(mcp: FastMCP) -> AsyncIterator[AppContext]:
+async def lifespan(mcp: MCPServer) -> AsyncIterator[AppContext]:
     """
     Asynchronous context manager for the lifespan of the MCP server.
 
@@ -80,11 +79,10 @@ async def lifespan(mcp: FastMCP) -> AsyncIterator[AppContext]:
         logger.info("Igloo client connection closed.")
 
 
-mcp = FastMCP(
+mcp = MCPServer(
     name=_config.server_name,
     instructions=_config.server_instructions,
     lifespan=lifespan,
-    host=_config.host,
 )
 
 
@@ -96,7 +94,7 @@ async def health_check(request: Request) -> JSONResponse:
 
 @mcp.tool(name="search_content")
 async def search_content_tool(
-    ctx: Context[ServerSession, AppContext],
+    ctx: Context[AppContext],
     query: str | None = None,
     applications: list[
         Literal[
@@ -244,7 +242,7 @@ async def search_content_tool(
 
 @mcp.tool(name="fetch_content")
 async def fetch_content_tool(
-    ctx: Context[ServerSession, AppContext],
+    ctx: Context[AppContext],
     url: str | list[str],
     max_length: int | None = None,
     start_index: int | None = None,
@@ -458,7 +456,7 @@ async def fetch_content_tool(
 
 @mcp.tool(name="search_members")
 async def search_members_tool(
-    ctx: Context[ServerSession, AppContext],
+    ctx: Context[AppContext],
     query: str,
     limit: int = 10,
 ) -> str:
@@ -494,7 +492,7 @@ async def search_members_tool(
 
 @mcp.tool(name="fetch_members")
 async def fetch_members_tool(
-    ctx: Context[ServerSession, AppContext],
+    ctx: Context[AppContext],
     members_ids: list[str],
 ) -> str:
     """
@@ -560,9 +558,11 @@ async def _fetch_single_member(
                 manager_response = await client.get_member_info(item["Value"])
                 manager_name = manager_response.get("name", {}).get("fullName")
             except (httpx.HTTPStatusError, httpx.TimeoutException):
-                logger.warning(f"Failed to fetch manager info for member '{member_id}' with manager ID '{item['Value']}'")
+                logger.warning(
+                    f"Failed to fetch manager info for member '{member_id}' with manager ID '{item['Value']}'"
+                )
             break
-    
+
     return {
         "profile": format_member_profile(
             member_info=member_info,
@@ -576,7 +576,10 @@ async def _fetch_single_member(
 def main():
     """Main entry point for the MCP server."""
     try:
-        mcp.run(transport=_config.transport)
+        if _config.transport == "stdio":
+            mcp.run(transport="stdio")
+        else:
+            mcp.run(transport=_config.transport, host=_config.host)
 
     except Exception as e:
         logger.exception(f"Failed to start MCP server: {e}")
